@@ -1,72 +1,67 @@
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url)
-  const url = searchParams.get("url")
+  const { searchParams } = new URL(req.url);
+  const url = searchParams.get("url");
+  const apiKey = process.env.GEMINI_API_KEY;
 
   if (!url) {
-    return NextResponse.json({ error: "Missing URL parameter" }, { status: 400 })
+    return NextResponse.json({ error: "URL parameter is required" }, { status: 400 });
   }
 
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-  if (!GEMINI_API_KEY) {
-    return NextResponse.json({ error: "Missing Gemini API Key" }, { status: 500 })
+  if (!apiKey) {
+    return NextResponse.json({ error: "Missing Gemini API key" }, { status: 500 });
   }
 
   const prompt = `
-You are an expert website analyst.
-
-Analyze the website at ${url} and respond ONLY in JSON format matching EXACTLY this structure:
+Analyze the following website: ${url}
+Respond STRICTLY in JSON ONLY. Use this structure:
 
 {
-  "business_summary": string,
-  "unique_selling_points": string[],
-  "product_breakdown": string[],
+  "business_summary": "...",
+  "unique_selling_points": ["...", "..."],
+  "product_breakdown": ["...", "..."],
   "seo_analysis": {
-    "estimated_traffic": string,
-    "seo_score": string,
-    "top_keywords": string[],
-    "keyword_density": { [keyword: string]: string },
-    "strengths": string[],
-    "weaknesses": string[],
-    "meta_description": string,
-    "title_tag": string
+    "estimated_traffic": "...",
+    "seo_score": "...",
+    "top_keywords": ["...", "..."],
+    "keyword_density": {"keyword1": "density", "keyword2": "density"},
+    "strengths": ["...", "..."],
+    "weaknesses": ["...", "..."],
+    "meta_description": "...",
+    "title_tag": "..."
   }
 }
-
-Do not explain or add anything else. Respond only with this JSON object.
-`
+NO explanations, JSON ONLY.
+`;
 
   try {
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-        }),
-      }
-    )
+    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    });
 
-    const result = await geminiResponse.json()
+    const geminiJson = await geminiRes.json();
+    const rawText = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-    const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || ""
-
-    let structured
-    try {
-      structured = JSON.parse(rawText)
-    } catch (err) {
-      console.error("JSON parse error:", err)
-      return NextResponse.json(
-        { error: "Failed to parse Gemini response as JSON", raw: rawText },
-        { status: 500 }
-      )
+    if (!rawText) {
+      return NextResponse.json({ error: "Empty response from Gemini API" }, { status: 500 });
     }
 
-    return NextResponse.json(structured)
-  } catch (error: any) {
-    console.error("Gemini API error:", error)
-    return NextResponse.json({ error: error.message || "Unknown error" }, { status: 500 })
+    let structured;
+    try {
+      structured = JSON.parse(rawText);
+    } catch (err) {
+      console.error("JSON parse error:", err, rawText);
+      return NextResponse.json({ error: "Invalid JSON format from Gemini", raw: rawText }, { status: 500 });
+    }
+
+    return NextResponse.json(structured);
+  } catch (error) {
+    console.error("Gemini API fetch error:", error);
+    return NextResponse.json({ error: "Internal Server Error", details: error }, { status: 500 });
   }
 }
